@@ -23,10 +23,10 @@
   "gregoryminer.info.depth": "깊이: Y %s 부터 Y %s 까지",
   "gregoryminer.info.order.chunk": "순서: 청크 단위",
   "gregoryminer.info.order.line": "순서: 한 줄씩",
-  "gregoryminer.info.speed": "속도: %s틱당 1줄, 블록당 %s EU",
+  "gregoryminer.info.speed": "속도: %s틱당 1줄, 줄당 %s EU",
   "gregoryminer.info.filter.off": "필터: 꺼짐 (전부 회수)",
-  "gregoryminer.info.filter.on": "필터: 화이트리스트 %s종, 나머지는 소각",
-  "gregoryminer.info.last_column": "마지막 줄: %s 블록, %s EU",
+  "gregoryminer.info.filter.on": "필터: 화이트리스트 %s종, 나머지는 전부 소각",
+  "gregoryminer.info.last_column": "마지막 줄: %s 블록",
   "gregoryminer.info.total_mined": "총 채굴: %s 블록",
   "gregoryminer.info.invalid_tool": "도구 슬롯의 아이템이 GT 곡괭이/드릴이 아님 (무시됨)",
   "gregoryminer.gui.tool_slot.tooltip": "GT 곡괭이 또는 드릴: 행운/섬세한 손길이 채굴하는 모든 블록에 적용됩니다. 소모되지 않습니다.",
@@ -59,9 +59,12 @@
   "gregoryminer.jade.progress": "%s / %s 줄",
   "gregoryminer.tooltip.desc": "청크 디스트로이어처럼 아래 영역을 한 줄씩 밀어버립니다",
   "gregoryminer.tooltip.speed": "§b%s틱마다 1줄",
-  "gregoryminer.tooltip.energy": "§e블록당 %s EU 소모",
+  "gregoryminer.tooltip.energy": "§e줄당 %s EU 소모 (고정)",
   "gregoryminer.tooltip.area": "§7최대 영역: %s x %s 청크",
   "gregoryminer.tooltip.tool": "§7GT 곡괭이나 드릴을 넣으면 그 행운/섬세한 손길로 채굴합니다",
   "gregoryminer.tooltip.filter": "§7화이트리스트 필터: %s x %s 고스트 슬롯",
-  "config.jade.plugin_gregoryminer.miner_info": "그레고리 마이너 정보"
+  "config.jade.plugin_gregoryminer.miner_info": "그레고리 마이너 정보",
+  "gregoryminer.info.output_full": "출력 인벤토리가 가득 참 - 드롭이 버퍼에 쌓이는 중!",
+  "gregoryminer.gui.step.tooltip": "Shift+클릭: ±4 청크 / ±16 블록",
+  "gregoryminer.info.items": "아이템: 회수 %s / 출력 %s / 필터 소각 %s"
 }

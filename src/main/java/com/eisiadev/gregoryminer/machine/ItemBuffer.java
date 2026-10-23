@@ -87,7 +87,7 @@ public final class ItemBuffer {
             long before = count;
             while (count > 0 && calls < maxStacks) {
                 int n = (int) Math.min(count, max);
-                ItemStack rest = ItemHandlerHelper.insertItemStacked(target, key.copyWithCount(n), false);
+                ItemStack rest = ItemHandlerHelper.insertItem(target, key.copyWithCount(n), false);
                 calls++;
                 int inserted = n - rest.getCount();
                 count -= inserted;

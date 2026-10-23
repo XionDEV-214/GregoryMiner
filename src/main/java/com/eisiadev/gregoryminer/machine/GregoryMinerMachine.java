@@ -1,5 +1,6 @@
 package com.eisiadev.gregoryminer.machine;
 
+import com.eisiadev.gregoryminer.GregoryMiner;
 import com.eisiadev.gregoryminer.client.AreaRenderRegistry;
 import com.eisiadev.gregoryminer.config.GMConfig;
 import com.eisiadev.gregoryminer.machine.ui.GregoryMinerUI;
@@ -50,7 +51,6 @@ import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.common.capabilities.ForgeCapabilities;
 import net.minecraftforge.common.util.FakePlayer;
 import net.minecraftforge.common.util.FakePlayerFactory;
-import net.minecraftforge.common.util.LazyOptional;
 import net.minecraftforge.event.level.BlockEvent;
 import net.minecraftforge.items.IItemHandler;
 
@@ -77,7 +77,7 @@ public class GregoryMinerMachine extends TieredEnergyMachine
             Block.UPDATE_SUPPRESS_DROPS;
     private static final int MAX_FREE_SKIPS = 64;
     private static final int OUTPUT_BACKOFF_TICKS = 20;
-    private static final GameProfile ANONYMOUS_PROFILE = new GameProfile(
+    public static final GameProfile FAKE_PROFILE = new GameProfile(
             UUID.fromString("6e0c5c7e-5b2b-4b9f-9a57-6772656f7279"), "[GregoryMiner]");
 
     @Persisted
@@ -131,7 +131,11 @@ public class GregoryMinerMachine extends TieredEnergyMachine
     @DescSynced
     protected int columnsDone = 0;
     @Persisted
+    @DescSynced
     protected long blocksMinedTotal = 0;
+    @Persisted
+    @DescSynced
+    protected long itemsKeptTotal = 0, itemsVoidedTotal = 0, itemsOutputTotal = 0;
 
     @DescSynced
     protected int areaMinX, areaMinZ, areaMaxX, areaMaxZ;
@@ -141,22 +145,33 @@ public class GregoryMinerMachine extends TieredEnergyMachine
     protected MiningStatus status = MiningStatus.IDLE;
     @DescSynced
     protected boolean outputMissing = false;
+    @DescSynced
+    protected boolean outputFull = false;
+    @DescSynced
+    protected int fortuneLevel = 0, silkLevel = 0;
+    @DescSynced
+    protected boolean toolValid = false, toolPresent = false;
+    @DescSynced
+    protected long bufferUsed = 0;
+    @DescSynced
+    protected int bufferKinds = 0;
+    @DescSynced
+    protected int whitelistSize = 0;
+    @DescSynced
+    protected int lastColumnBlocks = 0;
+    @DescSynced
+    protected int syncInterval = 1, syncBufferCap = 1;
+    @DescSynced
+    protected long syncEuPerColumn = 0;
 
     @Nullable
     private MinerArea area;
     @Nullable
     private TickableSubscription tickSubscription;
     private long nextOutputTick = 0;
-    private LazyOptional<IItemHandler> outputCap = LazyOptional.empty();
-    private boolean outputCapDirty = true;
-    private long pendingCost = 0;
-    private int cachedFortune = 0, cachedSilk = 0;
-    private boolean cachedToolValid = false;
     private final Set<Item> whitelist = new ReferenceOpenHashSet<>();
     @Nullable
     private GameProfile ownerProfile;
-    private int lastColumnBlocks = 0;
-    private long lastColumnEU = 0;
 
     private final LongArrayList scanPos = new LongArrayList(64);
     private final ByteArrayList scanKind = new ByteArrayList(64);
@@ -213,7 +228,8 @@ public class GregoryMinerMachine extends TieredEnergyMachine
         recomputeArea();
         onToolChanged();
         rebuildWhitelist();
-        outputCapDirty = true;
+        refreshConfigSnapshot();
+        updateBufferStats();
         updateSubscription();
     }
 
@@ -224,7 +240,6 @@ public class GregoryMinerMachine extends TieredEnergyMachine
             AreaRenderRegistry.remove(this);
         }
         tickSubscription = null;
-        outputCap = LazyOptional.empty();
     }
 
     @Override
@@ -258,12 +273,12 @@ public class GregoryMinerMachine extends TieredEnergyMachine
         } else {
             buffer.clear();
         }
+        updateBufferStats();
     }
 
     @Override
     public void onNeighborChanged(Block block, BlockPos fromPos, boolean isMoving) {
         super.onNeighborChanged(block, fromPos, isMoving);
-        outputCapDirty = true;
         nextOutputTick = 0;
     }
 
@@ -273,7 +288,7 @@ public class GregoryMinerMachine extends TieredEnergyMachine
         if (outputFacingItems == newFacing) {
             outputFacingItems = newFacing.getOpposite();
         }
-        outputCapDirty = true;
+        nextOutputTick = 0;
     }
 
     protected void updateSubscription() {
@@ -310,7 +325,9 @@ public class GregoryMinerMachine extends TieredEnergyMachine
             setStatus(MiningStatus.BUFFER_FULL);
             return;
         }
-        if (pendingCost > 0 && energyContainer.getEnergyStored() < pendingCost) {
+        refreshConfigSnapshot();
+        long cost = Math.min(syncEuPerColumn, energyContainer.getEnergyCapacity());
+        if (energyContainer.getEnergyStored() < cost) {
             setStatus(MiningStatus.NO_POWER);
             return;
         }
@@ -323,12 +340,8 @@ public class GregoryMinerMachine extends TieredEnergyMachine
         }
 
         for (int skips = 0; skips <= MAX_FREE_SKIPS; skips++) {
-            ColumnResult r = mineOneColumn(level, cursorX, cursorZ);
+            ColumnResult r = mineOneColumn(level, cursorX, cursorZ, cost);
             switch (r) {
-                case WAIT_POWER -> {
-                    setStatus(MiningStatus.NO_POWER);
-                    return;
-                }
                 case WAIT_CHUNK -> {
                     setStatus(MiningStatus.CHUNK_NOT_LOADED);
                     return;
@@ -353,11 +366,10 @@ public class GregoryMinerMachine extends TieredEnergyMachine
     private enum ColumnResult {
         MINED,
         EMPTY,
-        WAIT_POWER,
         WAIT_CHUNK
     }
 
-    private ColumnResult mineOneColumn(ServerLevel level, int x, int z) {
+    private ColumnResult mineOneColumn(ServerLevel level, int x, int z, long cost) {
         int cx = SectionPos.blockToSectionCoord(x);
         int cz = SectionPos.blockToSectionCoord(z);
         if (!level.hasChunk(cx, cz) && !GMConfig.loadUnloadedChunks()) return ColumnResult.WAIT_CHUNK;
@@ -401,14 +413,6 @@ public class GregoryMinerMachine extends TieredEnergyMachine
             return ColumnResult.EMPTY;
         }
 
-        long cost = count * GMConfig.euPerBlock(tier);
-        long pay = Math.min(cost, energyContainer.getEnergyCapacity());
-        if (energyContainer.getEnergyStored() < pay) {
-            pendingCost = pay;
-            return ColumnResult.WAIT_POWER;
-        }
-        pendingCost = 0;
-
         GMConfig.ProtectionMode protection = GMConfig.protectionMode();
         FakePlayer fakePlayer = protection == GMConfig.ProtectionMode.NONE ? null : getFakePlayer(level);
         if (protection == GMConfig.ProtectionMode.COLUMN) {
@@ -420,11 +424,12 @@ public class GregoryMinerMachine extends TieredEnergyMachine
             }
         }
 
-        energyContainer.removeEnergy(pay);
+        energyContainer.removeEnergy(cost);
 
-        ItemStack tool = cachedToolValid ? toolInventory.getStackInSlot(0) : MinerTools.fallbackTool();
+        ItemStack tool = toolValid ? toolInventory.getStackInSlot(0) : MinerTools.fallbackTool();
         boolean filtering = !whitelist.isEmpty();
         int mined = 0;
+        long kept = 0, voided = 0;
 
         for (int i = 0; i < count; i++) {
             mpos.set(scanPos.getLong(i));
@@ -447,7 +452,11 @@ public class GregoryMinerMachine extends TieredEnergyMachine
             for (int d = 0, n = drops.size(); d < n; d++) {
                 ItemStack drop = drops.get(d);
                 if (drop.isEmpty()) continue;
-                if (filtering && !whitelist.contains(drop.getItem())) continue;
+                if (filtering && !whitelist.contains(drop.getItem())) {
+                    voided += drop.getCount();
+                    continue;
+                }
+                kept += drop.getCount();
                 buffer.add(drop);
             }
             level.setBlock(mpos, Blocks.AIR.defaultBlockState(), REMOVE_FLAGS);
@@ -457,7 +466,14 @@ public class GregoryMinerMachine extends TieredEnergyMachine
         columnsDone++;
         blocksMinedTotal += mined;
         lastColumnBlocks = mined;
-        lastColumnEU = pay;
+        itemsKeptTotal += kept;
+        itemsVoidedTotal += voided;
+        updateBufferStats();
+        if (GMConfig.debugLogging()) {
+            GregoryMiner.LOGGER.info("[{}] column ({}, {}): {} blocks, {} items kept, {} voided by filter, " +
+                    "buffer {} stacks / {} kinds", getPos(), x, z, mined, kept, voided, buffer.usedStacks(),
+                    buffer.kinds());
+        }
         if (!buffer.isEmpty()) updateSubscription();
         return ColumnResult.MINED;
     }
@@ -479,13 +495,25 @@ public class GregoryMinerMachine extends TieredEnergyMachine
         boolean missing = target == null;
         if (outputMissing != missing) outputMissing = missing;
         if (target == null) {
-            outputCapDirty = true;
+            if (outputFull) outputFull = false;
+            if (GMConfig.debugLogging()) {
+                GregoryMiner.LOGGER.info("[{}] output -> {}: no item handler there", getPos(), outputFacingItems);
+            }
             nextOutputTick = now + OUTPUT_BACKOFF_TICKS;
             return;
         }
+        long before = buffer.totalItems();
         long moved = buffer.flushInto(target, GMConfig.outputStacksPerTick());
+        itemsOutputTotal += moved;
+        if (GMConfig.debugLogging()) {
+            GregoryMiner.LOGGER.info("[{}] output -> {} ({}): moved {} of {} items, buffer left {}", getPos(),
+                    outputFacingItems, target.getClass().getName(), moved, before, buffer.totalItems());
+        }
         nextOutputTick = moved > 0 ? now + 1 : now + OUTPUT_BACKOFF_TICKS;
+        boolean full = moved == 0 && !buffer.isEmpty();
+        if (outputFull != full) outputFull = full;
         if (moved > 0) {
+            updateBufferStats();
             markDirty();
             if (status == MiningStatus.BUFFER_FULL && buffer.usedStacks() < GMConfig.bufferStacks()) {
                 setStatus(MiningStatus.WORKING);
@@ -496,45 +524,54 @@ public class GregoryMinerMachine extends TieredEnergyMachine
 
     @Nullable
     private IItemHandler getOutputHandler(ServerLevel level) {
-        if (outputCapDirty) {
-            outputCapDirty = false;
-            outputCap = LazyOptional.empty();
-            Direction face = outputFacingItems;
-            if (face == null) return null;
-            BlockEntity be = level.getBlockEntity(getPos().relative(face));
-            if (be != null) {
-                LazyOptional<IItemHandler> cap = be.getCapability(ForgeCapabilities.ITEM_HANDLER, face.getOpposite());
-                if (cap.isPresent()) {
-                    cap.addListener(l -> outputCapDirty = true);
-                    outputCap = cap;
-                }
-            }
-        }
-        return outputCap.resolve().orElse(null);
+        Direction face = outputFacingItems;
+        if (face == null) return null;
+        BlockEntity be = level.getBlockEntity(getPos().relative(face));
+        if (be == null) return null;
+        return be.getCapability(ForgeCapabilities.ITEM_HANDLER, face.getOpposite()).resolve().orElse(null);
     }
 
     private FakePlayer getFakePlayer(ServerLevel level) {
-        if (ownerProfile == null) {
-            UUID owner = getOwnerUUID();
-            if (owner == null) {
-                return FakePlayerFactory.get(level, ANONYMOUS_PROFILE);
-            } else {
-                String name = "[GregoryMiner]";
-                GameProfileCache cache = level.getServer().getProfileCache();
-                if (cache != null) {
-                    name = cache.get(owner).map(GameProfile::getName).orElse(name);
-                }
-                ownerProfile = new GameProfile(owner, name);
+        if (!GMConfig.fakePlayerUsesOwnerUuid()) {
+            return FakePlayerFactory.get(level, FAKE_PROFILE);
+        }
+        UUID owner = getOwnerUUID();
+        if (owner == null) return FakePlayerFactory.get(level, FAKE_PROFILE);
+        if (ownerProfile == null || !owner.equals(ownerProfile.getId())) {
+            String name = FAKE_PROFILE.getName();
+            GameProfileCache cache = level.getServer().getProfileCache();
+            if (cache != null) {
+                name = cache.get(owner).map(GameProfile::getName).orElse(name);
             }
+            ownerProfile = new GameProfile(owner, name);
         }
         return FakePlayerFactory.get(level, ownerProfile);
     }
 
     private void onToolChanged() {
+        if (isRemote()) return;
         ItemStack tool = toolInventory.getStackInSlot(0);
-        cachedToolValid = MinerTools.isValidTool(tool);
-        cachedFortune = cachedToolValid ? MinerTools.fortune(tool) : 0;
-        cachedSilk = cachedToolValid ? MinerTools.silkTouch(tool) : 0;
+        toolPresent = !tool.isEmpty();
+        toolValid = MinerTools.isValidTool(tool);
+        fortuneLevel = toolValid ? MinerTools.fortune(tool) : 0;
+        silkLevel = toolValid ? MinerTools.silkTouch(tool) : 0;
+    }
+
+    private void updateBufferStats() {
+        long used = buffer.usedStacks();
+        int kinds = buffer.kinds();
+        if (bufferUsed != used) bufferUsed = used;
+        if (bufferKinds != kinds) bufferKinds = kinds;
+        if (buffer.isEmpty() && outputFull) outputFull = false;
+    }
+
+    private void refreshConfigSnapshot() {
+        int interval = GMConfig.interval(tier);
+        long eu = GMConfig.euPerColumn(tier);
+        int cap = GMConfig.bufferStacks();
+        if (syncInterval != interval) syncInterval = interval;
+        if (syncEuPerColumn != eu) syncEuPerColumn = eu;
+        if (syncBufferCap != cap) syncBufferCap = cap;
     }
 
     private void rebuildWhitelist() {
@@ -543,6 +580,7 @@ public class GregoryMinerMachine extends TieredEnergyMachine
             ItemStack s = filterInventory.getStackInSlot(i);
             if (!s.isEmpty()) whitelist.add(s.getItem());
         }
+        if (!isRemote()) whitelistSize = whitelist.size();
     }
 
     protected MinerArea getArea() {
@@ -567,7 +605,6 @@ public class GregoryMinerMachine extends TieredEnergyMachine
         cursorValid = false;
         done = false;
         columnsDone = 0;
-        pendingCost = 0;
         long head = getArea().head();
         cursorX = MinerArea.unpackX(head);
         cursorZ = MinerArea.unpackZ(head);
@@ -719,7 +756,6 @@ public class GregoryMinerMachine extends TieredEnergyMachine
     public void setOutputFacingItems(@Nullable Direction outputFacing) {
         if (outputFacing == null || outputFacing == getFrontFacing()) return;
         outputFacingItems = outputFacing;
-        outputCapDirty = true;
         nextOutputTick = 0;
         updateSubscription();
     }
@@ -744,39 +780,43 @@ public class GregoryMinerMachine extends TieredEnergyMachine
     public void addDisplayText(List<Component> text, boolean full) {
         text.add(Component.translatable("gregoryminer.info.status",
                 Component.translatable(status.langKey()).withStyle(status.color)));
-        int total = getArea().totalColumns();
+        int total = Math.max(0, getTotalColumns());
         text.add(Component.translatable("gregoryminer.info.progress", columnsDone, total,
                 String.format("%.1f", total == 0 ? 100.0 : columnsDone * 100.0 / total)));
         if (!done) {
             text.add(Component.translatable("gregoryminer.info.cursor", cursorX, cursorZ)
                     .withStyle(ChatFormatting.GRAY));
         }
-        text.add(Component.translatable("gregoryminer.info.fortune", cachedFortune)
-                .append(cachedSilk > 0 ? Component.translatable("gregoryminer.info.silk_touch") :
+        text.add(Component.translatable("gregoryminer.info.fortune", fortuneLevel)
+                .append(silkLevel > 0 ? Component.translatable("gregoryminer.info.silk_touch") :
                         Component.empty()));
-        text.add(Component.translatable("gregoryminer.info.buffer", buffer.usedStacks(), GMConfig.bufferStacks(),
-                buffer.kinds()));
-        if (outputMissing && !buffer.isEmpty()) {
+        text.add(Component.translatable("gregoryminer.info.buffer", bufferUsed, syncBufferCap, bufferKinds));
+        if (bufferUsed > 0 && outputMissing) {
             text.add(Component.translatable("gregoryminer.info.no_output").withStyle(ChatFormatting.RED));
+        } else if (outputFull) {
+            text.add(Component.translatable("gregoryminer.info.output_full").withStyle(ChatFormatting.RED));
+        }
+        if (whitelistSize > 0) {
+            text.add(Component.translatable("gregoryminer.info.filter.on", whitelistSize)
+                    .withStyle(ChatFormatting.YELLOW));
+        }
+        if (toolPresent && !toolValid) {
+            text.add(Component.translatable("gregoryminer.info.invalid_tool").withStyle(ChatFormatting.RED));
         }
         if (!full) return;
-        MinerArea a = getArea();
-        text.add(Component.translatable("gregoryminer.info.area", a.width(), a.depth(), a.minX, a.minZ, a.maxX,
-                a.maxZ));
+        int w = areaMaxX - areaMinX + 1, d = areaMaxZ - areaMinZ + 1;
+        text.add(Component.translatable("gregoryminer.info.area", w, d, areaMinX, areaMinZ, areaMaxX, areaMaxZ));
         text.add(Component.translatable("gregoryminer.info.depth", areaTopY, areaBottomY));
         text.add(Component.translatable(chunkByChunk ? "gregoryminer.info.order.chunk" :
                 "gregoryminer.info.order.line"));
-        text.add(Component.translatable("gregoryminer.info.speed", GMConfig.interval(tier),
-                GMConfig.euPerBlock(tier)));
-        text.add(Component.translatable(whitelist.isEmpty() ? "gregoryminer.info.filter.off" :
-                "gregoryminer.info.filter.on", whitelist.size()));
-        text.add(Component.translatable("gregoryminer.info.last_column", lastColumnBlocks, lastColumnEU)
+        text.add(Component.translatable("gregoryminer.info.speed", syncInterval, syncEuPerColumn));
+        if (whitelistSize == 0) text.add(Component.translatable("gregoryminer.info.filter.off"));
+        text.add(Component.translatable("gregoryminer.info.last_column", lastColumnBlocks)
                 .withStyle(ChatFormatting.GRAY));
         text.add(Component.translatable("gregoryminer.info.total_mined", blocksMinedTotal)
                 .withStyle(ChatFormatting.GRAY));
-        if (!toolInventory.getStackInSlot(0).isEmpty() && !cachedToolValid) {
-            text.add(Component.translatable("gregoryminer.info.invalid_tool").withStyle(ChatFormatting.RED));
-        }
+        text.add(Component.translatable("gregoryminer.info.items", itemsKeptTotal, itemsOutputTotal,
+                itemsVoidedTotal).withStyle(ChatFormatting.GRAY));
     }
 
     public CustomItemStackHandler getToolInventory() {
@@ -864,11 +904,11 @@ public class GregoryMinerMachine extends TieredEnergyMachine
     }
 
     public int getFortune() {
-        return cachedFortune;
+        return fortuneLevel;
     }
 
     public int getSilkTouch() {
-        return cachedSilk;
+        return silkLevel;
     }
 
     public ItemBuffer getBuffer() {
@@ -876,15 +916,15 @@ public class GregoryMinerMachine extends TieredEnergyMachine
     }
 
     public int getWhitelistSize() {
-        return whitelist.size();
+        return whitelistSize;
     }
 
     public boolean isOutputMissing() {
         return outputMissing;
     }
 
-    public long getEnergyPerBlock() {
-        return GMConfig.euPerBlock(tier);
+    public long getEnergyPerColumn() {
+        return syncEuPerColumn;
     }
 
     public int getVoltageTier() {

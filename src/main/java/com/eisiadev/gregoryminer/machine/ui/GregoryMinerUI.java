@@ -3,10 +3,10 @@ package com.eisiadev.gregoryminer.machine.ui;
 import com.eisiadev.gregoryminer.machine.GregoryMinerMachine;
 import com.eisiadev.gregoryminer.machine.MinerArea;
 
+import com.gregtechceu.gtceu.GTCEu;
 import com.gregtechceu.gtceu.api.gui.GuiTextures;
 import com.gregtechceu.gtceu.api.gui.fancy.FancyMachineUIWidget;
 import com.gregtechceu.gtceu.api.gui.fancy.IFancyUIProvider;
-import com.gregtechceu.gtceu.api.gui.widget.IntInputWidget;
 import com.gregtechceu.gtceu.api.gui.widget.PhantomSlotWidget;
 import com.gregtechceu.gtceu.api.gui.widget.SlotWidget;
 
@@ -25,16 +25,67 @@ import com.lowdragmc.lowdraglib.gui.widget.Widget;
 import com.lowdragmc.lowdraglib.gui.widget.WidgetGroup;
 
 import net.minecraft.ChatFormatting;
+import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.Items;
 
 import java.util.List;
 import java.util.function.Consumer;
+import java.util.function.DoubleSupplier;
+import java.util.function.IntConsumer;
+import java.util.function.IntSupplier;
 import java.util.function.Supplier;
 
 public final class GregoryMinerUI {
 
     private GregoryMinerUI() {}
+
+    static final class NoSyncGroup extends WidgetGroup {
+
+        NoSyncGroup(int x, int y, int width, int height) {
+            super(x, y, width, height);
+        }
+
+        @Override
+        public void writeInitialData(FriendlyByteBuf buffer) {}
+
+        @Override
+        public void readInitialData(FriendlyByteBuf buffer) {}
+    }
+
+    private static ComponentPanelWidget clientText(int x, int y, int maxWidth, Consumer<List<Component>> supplier) {
+        ComponentPanelWidget panel = new ComponentPanelWidget(x, y, supplier) {
+
+            @Override
+            public void detectAndSendChanges() {}
+
+            @Override
+            public void writeInitialData(FriendlyByteBuf buffer) {}
+
+            @Override
+            public void readInitialData(FriendlyByteBuf buffer) {}
+        };
+        panel.setMaxWidthLimit(maxWidth);
+        if (GTCEu.isClientThread()) panel.setClientSideWidget();
+        return panel;
+    }
+
+    private static ProgressWidget clientProgress(DoubleSupplier supplier, int x, int y, int width, int height,
+                                                 ProgressTexture texture) {
+        ProgressWidget widget = new ProgressWidget(supplier, x, y, width, height, texture) {
+
+            @Override
+            public void detectAndSendChanges() {}
+
+            @Override
+            public void writeInitialData(FriendlyByteBuf buffer) {}
+
+            @Override
+            public void readInitialData(FriendlyByteBuf buffer) {}
+        };
+        if (GTCEu.isClientThread()) widget.setClientSideWidget();
+        return widget;
+    }
 
     private static IGuiTexture buttonText(Supplier<String> langKey) {
         return new GuiTextureGroup(GuiTextures.BUTTON, new TextTexture(langKey));
@@ -47,15 +98,13 @@ public final class GregoryMinerUI {
     }
 
     public static Widget createMainPage(GregoryMinerMachine machine) {
-        WidgetGroup group = new WidgetGroup(0, 0, 172, 110);
+        WidgetGroup group = new NoSyncGroup(0, 0, 172, 110);
 
         WidgetGroup screen = new WidgetGroup(0, 0, 144, 84);
         screen.setBackground(GuiTextures.BACKGROUND_INVERSE);
         DraggableScrollableWidgetGroup scroll = new DraggableScrollableWidgetGroup(4, 4, 136, 76);
         scroll.setBackground(GuiTextures.DISPLAY);
-        ComponentPanelWidget panel = new ComponentPanelWidget(4, 4, list -> machine.addDisplayText(list, true))
-                .setMaxWidthLimit(126);
-        scroll.addWidget(panel);
+        scroll.addWidget(clientText(4, 4, 126, list -> machine.addDisplayText(list, true)));
         screen.addWidget(scroll);
         group.addWidget(screen);
 
@@ -64,12 +113,10 @@ public final class GregoryMinerUI {
         toolSlot.setHoverTooltips(Component.translatable("gregoryminer.gui.tool_slot.tooltip"));
         group.addWidget(toolSlot);
 
-        ProgressWidget energy = new ProgressWidget(
-                () -> {
-                    long cap = machine.energyContainer.getEnergyCapacity();
-                    return cap <= 0 ? 0 : machine.energyContainer.getEnergyStored() / (double) cap;
-                },
-                151, 24, 16, 60, new ProgressTexture(IGuiTexture.EMPTY, GuiTextures.ENERGY_BAR_BASE));
+        ProgressWidget energy = clientProgress(() -> {
+            long cap = machine.energyContainer.getEnergyCapacity();
+            return cap <= 0 ? 0 : machine.energyContainer.getEnergyStored() / (double) cap;
+        }, 151, 24, 16, 60, new ProgressTexture(IGuiTexture.EMPTY, GuiTextures.ENERGY_BAR_BASE));
         energy.setFillDirection(ProgressTexture.FillDirection.DOWN_TO_UP);
         energy.setBackground(GuiTextures.ENERGY_BAR_BACKGROUND);
         energy.setHoverTooltips(Component.translatable("gregoryminer.gui.energy.tooltip"));
@@ -102,7 +149,7 @@ public final class GregoryMinerUI {
 
         @Override
         public Widget createMainPage(FancyMachineUIWidget widget) {
-            WidgetGroup group = new WidgetGroup(0, 0, 172, 150);
+            WidgetGroup group = new NoSyncGroup(0, 0, 172, 150);
 
             group.addWidget(new ButtonWidget(0, 0, 172, 20,
                     buttonText(() -> machine.getAreaUnit() == MinerArea.Unit.CHUNK ? "gregoryminer.gui.unit.chunk" :
@@ -117,23 +164,35 @@ public final class GregoryMinerUI {
 
             WidgetGroup screen = new WidgetGroup(0, 114, 172, 36);
             screen.setBackground(GuiTextures.DISPLAY);
-            screen.addWidget(new ComponentPanelWidget(4, 4, list -> {
-                MinerArea.Unit unit = machine.getAreaUnit();
+            screen.addWidget(clientText(4, 4, 164, list -> {
                 int w = machine.getAreaMaxX() - machine.getAreaMinX() + 1;
                 int d = machine.getAreaMaxZ() - machine.getAreaMinZ() + 1;
                 list.add(Component.translatable("gregoryminer.gui.area_summary", w, d, w / 16.0f, d / 16.0f));
-                list.add(Component.translatable(unit == MinerArea.Unit.CHUNK ? "gregoryminer.gui.area_hint.chunk" :
-                        "gregoryminer.gui.area_hint.block"));
-            }).setMaxWidthLimit(164));
+                list.add(Component.translatable(machine.getAreaUnit() == MinerArea.Unit.CHUNK ?
+                        "gregoryminer.gui.area_hint.chunk" : "gregoryminer.gui.area_hint.block"));
+            }));
             group.addWidget(screen);
             return group;
         }
 
-        private static void addExtentRow(WidgetGroup group, int y, String labelKey, Supplier<Integer> getter,
-                                         Consumer<Integer> setter) {
-            group.addWidget(new ImageWidget(0, y, 50, 20, new TextTexture(labelKey)));
-            group.addWidget(new IntInputWidget(52, y, 120, 20, getter, setter)
-                    .setMin(0).setMax(32 * 16));
+        private void addExtentRow(WidgetGroup group, int y, String labelKey, IntSupplier getter,
+                                  IntConsumer setter) {
+            group.addWidget(new ImageWidget(0, y, 48, 20, new TextTexture(labelKey)));
+            group.addWidget(new ButtonWidget(50, y, 30, 20, buttonText(() -> "-"),
+                    cd -> {
+                        if (!cd.isRemote) setter.accept(getter.getAsInt() - step(cd));
+                    }).setHoverTooltips(Component.translatable("gregoryminer.gui.step.tooltip")));
+            group.addWidget(new ImageWidget(82, y, 56, 20, new GuiTextureGroup(GuiTextures.DISPLAY,
+                    new TextTexture(() -> String.valueOf(getter.getAsInt())))));
+            group.addWidget(new ButtonWidget(140, y, 30, 20, buttonText(() -> "+"),
+                    cd -> {
+                        if (!cd.isRemote) setter.accept(getter.getAsInt() + step(cd));
+                    }).setHoverTooltips(Component.translatable("gregoryminer.gui.step.tooltip")));
+        }
+
+        private int step(ClickData cd) {
+            if (!cd.isShiftClick) return 1;
+            return machine.getAreaUnit() == MinerArea.Unit.CHUNK ? 4 : 16;
         }
 
         @Override
@@ -167,7 +226,7 @@ public final class GregoryMinerUI {
             int gridPx = side * 18;
             int width = 172;
             int height = Math.max(gridPx, 60) + 50;
-            WidgetGroup group = new WidgetGroup(0, 0, width, height);
+            WidgetGroup group = new NoSyncGroup(0, 0, width, height);
 
             int gx = (width - gridPx) / 2;
             for (int row = 0; row < side; row++) {
@@ -189,10 +248,10 @@ public final class GregoryMinerUI {
 
             WidgetGroup screen = new WidgetGroup(0, y + 24, 172, 22);
             screen.setBackground(GuiTextures.DISPLAY);
-            screen.addWidget(new ComponentPanelWidget(4, 4, list -> list.add(Component.translatable(
+            screen.addWidget(clientText(4, 4, 164, list -> list.add(Component.translatable(
                     machine.getWhitelistSize() == 0 ? "gregoryminer.gui.filter.empty" :
                             "gregoryminer.gui.filter.active",
-                    machine.getWhitelistSize()))).setMaxWidthLimit(164));
+                    machine.getWhitelistSize()))));
             group.addWidget(screen);
             return group;
         }

@@ -60,7 +60,7 @@ public final class GMMachines {
                             tooltip.add(Component.translatable("gregoryminer.tooltip.speed",
                                     GMConfig.interval(tier)));
                             tooltip.add(Component.translatable("gregoryminer.tooltip.energy",
-                                    FormattingUtil.formatNumbers(GMConfig.euPerBlock(tier))));
+                                    FormattingUtil.formatNumbers(GMConfig.euPerColumn(tier))));
                             tooltip.add(Component.translatable("gregoryminer.tooltip.area", maxChunks, maxChunks));
                             tooltip.add(Component.translatable("gregoryminer.tooltip.tool"));
                             tooltip.add(Component.translatable("gregoryminer.tooltip.filter", side, side));

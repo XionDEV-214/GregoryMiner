@@ -9,12 +9,12 @@ import java.util.List;
 public final class GMConfig {
 
     public static final int[] DEFAULT_INTERVAL = { 20, 15, 10, 5, 1 };
-    public static final int[] DEFAULT_EU_PER_BLOCK = { 4, 12, 32, 64, 64 };
+    public static final long[] DEFAULT_EU_PER_COLUMN = { 640, 1920, 5120, 10240, 8192 };
 
     public static final ForgeConfigSpec SPEC;
 
     private static final ForgeConfigSpec.IntValue[] INTERVAL = new ForgeConfigSpec.IntValue[5];
-    private static final ForgeConfigSpec.LongValue[] EU_PER_BLOCK = new ForgeConfigSpec.LongValue[5];
+    private static final ForgeConfigSpec.LongValue[] EU_PER_COLUMN = new ForgeConfigSpec.LongValue[5];
     private static final ForgeConfigSpec.IntValue AMPERAGE;
     private static final ForgeConfigSpec.IntValue MAX_AREA_CHUNKS;
     private static final ForgeConfigSpec.IntValue BUFFER_SLOTS;
@@ -22,6 +22,8 @@ public final class GMConfig {
     private static final ForgeConfigSpec.EnumValue<ProtectionMode> PROTECTION_MODE;
     private static final ForgeConfigSpec.BooleanValue SKIP_NEGATIVE_HARDNESS;
     private static final ForgeConfigSpec.BooleanValue LOAD_UNLOADED_CHUNKS;
+    private static final ForgeConfigSpec.BooleanValue DEBUG_LOG;
+    private static final ForgeConfigSpec.BooleanValue FAKE_PLAYER_OWNER_ID;
     private static final ForgeConfigSpec.ConfigValue<List<? extends String>> EXTRA_UNMINABLE;
 
     public enum ProtectionMode {
@@ -40,8 +42,9 @@ public final class GMConfig {
             b.push(name);
             INTERVAL[i] = b.comment("Ticks between two column operations.")
                     .defineInRange("ticksPerColumn", DEFAULT_INTERVAL[i], 1, 1200);
-            EU_PER_BLOCK[i] = b.comment("EU consumed for every block (or fluid) removed in a column.")
-                    .defineInRange("euPerBlock", (long) DEFAULT_EU_PER_BLOCK[i], 0L, Long.MAX_VALUE / 4096);
+            EU_PER_COLUMN[i] = b.comment("Fixed EU consumed per column operation, no matter how many blocks it removes.",
+                    "Default = tier voltage x ticksPerColumn, i.e. exactly 1A on average.")
+                    .defineInRange("euPerColumn", DEFAULT_EU_PER_COLUMN[i], 0L, Long.MAX_VALUE / 4);
             b.pop();
         }
         b.pop();
@@ -65,6 +68,14 @@ public final class GMConfig {
         LOAD_UNLOADED_CHUNKS = b.comment("If false (default) the miner waits while the target chunk is not loaded",
                 "(use FTB Chunks or similar to keep the area loaded). If true it loads the chunk synchronously.")
                 .define("loadUnloadedChunks", false);
+        FAKE_PLAYER_OWNER_ID = b.comment("Protection checks use a dedicated fake player \"[GregoryMiner]\" (fixed UUID) by default.",
+                "For FTB Chunks, allow it once per team: Team settings -> allowed fake players by name -> [GregoryMiner].",
+                "If true, the fake player borrows the machine owner's UUID instead (FTB Chunks recognises it automatically,",
+                "but other mods may confuse it with the real player). Not recommended.")
+                .define("fakePlayerUsesOwnerUuid", false);
+        DEBUG_LOG = b.comment("Log every column (drops kept / voided) and every output attempt (target, items moved).",
+                "Only for troubleshooting: very spammy at IV.")
+                .define("debugLogging", false);
         EXTRA_UNMINABLE = b.comment("Extra block ids that are never mined (in addition to the #gregoryminer:unminable tag).")
                 .defineListAllowEmpty(List.of("extraUnminableBlocks"), () -> List.<String>of(),
                         o -> o instanceof String);
@@ -87,11 +98,11 @@ public final class GMConfig {
         }
     }
 
-    public static long euPerBlock(int tier) {
+    public static long euPerColumn(int tier) {
         try {
-            return EU_PER_BLOCK[tierIndex(tier)].get();
+            return EU_PER_COLUMN[tierIndex(tier)].get();
         } catch (IllegalStateException e) {
-            return DEFAULT_EU_PER_BLOCK[tierIndex(tier)];
+            return DEFAULT_EU_PER_COLUMN[tierIndex(tier)];
         }
     }
 
@@ -146,6 +157,22 @@ public final class GMConfig {
     public static boolean loadUnloadedChunks() {
         try {
             return LOAD_UNLOADED_CHUNKS.get();
+        } catch (IllegalStateException e) {
+            return false;
+        }
+    }
+
+    public static boolean fakePlayerUsesOwnerUuid() {
+        try {
+            return FAKE_PLAYER_OWNER_ID.get();
+        } catch (IllegalStateException e) {
+            return false;
+        }
+    }
+
+    public static boolean debugLogging() {
+        try {
+            return DEBUG_LOG.get();
         } catch (IllegalStateException e) {
             return false;
         }

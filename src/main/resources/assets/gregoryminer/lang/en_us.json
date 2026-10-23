@@ -23,10 +23,10 @@
   "gregoryminer.info.depth": "Depth: Y %s down to Y %s",
   "gregoryminer.info.order.chunk": "Order: chunk by chunk",
   "gregoryminer.info.order.line": "Order: line by line",
-  "gregoryminer.info.speed": "Speed: 1 column / %s ticks, %s EU per block",
+  "gregoryminer.info.speed": "Speed: 1 column / %s ticks, %s EU per column",
   "gregoryminer.info.filter.off": "Filter: off (keep everything)",
-  "gregoryminer.info.filter.on": "Filter: %s whitelisted item(s), rest is voided",
-  "gregoryminer.info.last_column": "Last column: %s blocks, %s EU",
+  "gregoryminer.info.filter.on": "Filter: %s whitelisted item(s), everything else is voided",
+  "gregoryminer.info.last_column": "Last column: %s blocks",
   "gregoryminer.info.total_mined": "Total mined: %s blocks",
   "gregoryminer.info.invalid_tool": "Tool slot item is not a GT pickaxe/drill (ignored)",
   "gregoryminer.gui.tool_slot.tooltip": "GT pickaxe or drill: its Fortune / Silk Touch is applied to every mined block. Never consumed.",
@@ -59,9 +59,12 @@
   "gregoryminer.jade.progress": "%s / %s columns",
   "gregoryminer.tooltip.desc": "Clears the area below it column by column, like a Chunk Destroyer",
   "gregoryminer.tooltip.speed": "§b1 column every %s tick(s)",
-  "gregoryminer.tooltip.energy": "§eUses %s EU per block",
+  "gregoryminer.tooltip.energy": "§eUses %s EU per column (fixed)",
   "gregoryminer.tooltip.area": "§7Max area: %s x %s chunks",
   "gregoryminer.tooltip.tool": "§7Insert a GT pickaxe or drill to mine with its Fortune / Silk Touch",
   "gregoryminer.tooltip.filter": "§7Whitelist filter: %s x %s ghost slots",
-  "config.jade.plugin_gregoryminer.miner_info": "Gregory Miner info"
+  "config.jade.plugin_gregoryminer.miner_info": "Gregory Miner info",
+  "gregoryminer.info.output_full": "Output inventory is full - drops pile up in the buffer!",
+  "gregoryminer.gui.step.tooltip": "Shift-click: ±4 chunks / ±16 blocks",
+  "gregoryminer.info.items": "Items: %s kept, %s output, %s voided by filter"
 }
