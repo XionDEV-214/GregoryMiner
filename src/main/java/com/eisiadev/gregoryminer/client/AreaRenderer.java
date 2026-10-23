@@ -2,6 +2,7 @@ package com.eisiadev.gregoryminer.client;
 
 import com.eisiadev.gregoryminer.GregoryMiner;
 import com.eisiadev.gregoryminer.machine.GregoryMinerMachine;
+import com.eisiadev.gregoryminer.machine.MinerArea;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.LevelRenderer;
@@ -22,6 +23,8 @@ import java.util.Iterator;
 
 @Mod.EventBusSubscriber(modid = GregoryMiner.MOD_ID, value = Dist.CLIENT, bus = Mod.EventBusSubscriber.Bus.FORGE)
 public final class AreaRenderer {
+
+    private static final int MAX_PREVIEW_COLUMNS = 64;
 
     private AreaRenderer() {}
 
@@ -65,14 +68,58 @@ public final class AreaRenderer {
             LevelRenderer.renderLineBox(pose, lines, new AABB(minX, bottom, minZ, maxX, top, maxZ),
                     0.25f, 0.75f, 1.0f, 1.0f);
             if (!m.isDone()) {
-                double x = m.getCursorX(), z = m.getCursorZ();
-                LevelRenderer.renderLineBox(pose, lines, new AABB(x, bottom, z, x + 1, top, z + 1),
-                        1.0f, 0.55f, 0.1f, 1.0f);
+                drawPreview(pose, lines, m, bottom, top);
             }
         }
 
         pose.popPose();
         if (lines != null) buffers.endBatch(RenderType.lines());
+    }
+
+    private static void drawPreview(PoseStack pose, VertexConsumer lines, GregoryMinerMachine m, double bottom,
+                                    double top) {
+        MinerArea area = MinerArea.ofBounds(m.getAreaMinX(), m.getAreaMinZ(), m.getAreaMaxX(), m.getAreaMaxZ());
+        int count = Math.min(m.getParallel(), MAX_PREVIEW_COLUMNS);
+        int x = m.getCursorX(), z = m.getCursorZ();
+
+        int boxMinX = 0, boxMaxX = 0, boxMinZ = 0, boxMaxZ = 0;
+        int runZ = 0, runMinX = 0, runMaxX = 0;
+        boolean hasBox = false, hasRun = false;
+        for (int i = 0; i <= count; i++) {
+            boolean end = i == count;
+            if (!end && hasRun && z == runZ && x == runMaxX + 1) {
+                runMaxX = x;
+            } else {
+                if (hasRun) {
+                    if (hasBox && runMinX == boxMinX && runMaxX == boxMaxX && runZ == boxMaxZ + 1) {
+                        boxMaxZ = runZ;
+                    } else {
+                        if (hasBox) drawBox(pose, lines, boxMinX, boxMinZ, boxMaxX, boxMaxZ, bottom, top);
+                        boxMinX = runMinX;
+                        boxMaxX = runMaxX;
+                        boxMinZ = boxMaxZ = runZ;
+                        hasBox = true;
+                    }
+                }
+                if (end) break;
+                runZ = z;
+                runMinX = runMaxX = x;
+                hasRun = true;
+            }
+            long next = area.next(x, z, m.isChunkByChunk());
+            if (next == Long.MIN_VALUE) count = i + 1;
+            else {
+                x = MinerArea.unpackX(next);
+                z = MinerArea.unpackZ(next);
+            }
+        }
+        if (hasBox) drawBox(pose, lines, boxMinX, boxMinZ, boxMaxX, boxMaxZ, bottom, top);
+    }
+
+    private static void drawBox(PoseStack pose, VertexConsumer lines, int minX, int minZ, int maxX, int maxZ,
+                                double bottom, double top) {
+        LevelRenderer.renderLineBox(pose, lines, new AABB(minX, bottom, minZ, maxX + 1, top, maxZ + 1),
+                1.0f, 0.55f, 0.1f, 1.0f);
     }
 
     @SubscribeEvent

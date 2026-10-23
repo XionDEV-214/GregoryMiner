@@ -3,6 +3,7 @@ package com.eisiadev.gregoryminer;
 import com.eisiadev.gregoryminer.common.GMMachines;
 import com.eisiadev.gregoryminer.config.GMConfig;
 import com.eisiadev.gregoryminer.machine.BlockRules;
+import com.eisiadev.gregoryminer.machine.LootDeterminism;
 
 import com.gregtechceu.gtceu.api.GTCEuAPI;
 import com.gregtechceu.gtceu.api.machine.MachineDefinition;
@@ -58,6 +59,7 @@ public class GregoryMiner {
 
     private void onTagsUpdated(TagsUpdatedEvent event) {
         BlockRules.invalidate();
+        LootDeterminism.invalidate();
     }
 
     public static ResourceLocation id(String path) {

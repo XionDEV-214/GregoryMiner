@@ -32,6 +32,11 @@ public final class MinerTools {
         return EnchantmentHelper.getItemEnchantmentLevel(Enchantments.SILK_TOUCH, stack);
     }
 
+    public static int harvestLevel(ItemStack stack) {
+        if (stack.isEmpty() || !(stack.getItem() instanceof IGTTool tool)) return 0;
+        return tool.getTotalHarvestLevel(stack);
+    }
+
     public static ItemStack fallbackTool() {
         if (fallbackTool == null) fallbackTool = new ItemStack(Items.NETHERITE_PICKAXE);
         return fallbackTool;

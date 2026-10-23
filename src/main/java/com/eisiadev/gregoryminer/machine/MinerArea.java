@@ -32,6 +32,10 @@ public final class MinerArea {
         return new MinerArea(origin.getX() - west, origin.getZ() - north, origin.getX() + east, origin.getZ() + south);
     }
 
+    public static MinerArea ofBounds(int minX, int minZ, int maxX, int maxZ) {
+        return new MinerArea(Math.min(minX, maxX), Math.min(minZ, maxZ), Math.max(minX, maxX), Math.max(minZ, maxZ));
+    }
+
     public int width() {
         return maxX - minX + 1;
     }

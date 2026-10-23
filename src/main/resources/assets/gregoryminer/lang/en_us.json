@@ -66,5 +66,7 @@
   "config.jade.plugin_gregoryminer.miner_info": "Gregory Miner info",
   "gregoryminer.info.output_full": "Output inventory is full - drops pile up in the buffer!",
   "gregoryminer.gui.step.tooltip": "Shift-click: ±4 chunks / ±16 blocks",
-  "gregoryminer.info.items": "Items: %s kept, %s output, %s voided by filter"
+  "gregoryminer.info.items": "Items: %s kept, %s output, %s voided by filter",
+  "gregoryminer.info.parallel": "Parallel: %s column(s) per operation (tool harvest level %s)",
+  "gregoryminer.tooltip.parallel": "§7Mines as many columns per operation as the tool's harvest level"
 }

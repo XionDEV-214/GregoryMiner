@@ -23,6 +23,8 @@ public final class GMConfig {
     private static final ForgeConfigSpec.BooleanValue SKIP_NEGATIVE_HARDNESS;
     private static final ForgeConfigSpec.BooleanValue LOAD_UNLOADED_CHUNKS;
     private static final ForgeConfigSpec.BooleanValue DEBUG_LOG;
+    private static final ForgeConfigSpec.BooleanValue FAST_REMOVAL;
+    private static final ForgeConfigSpec.BooleanValue CACHE_DROPS;
     private static final ForgeConfigSpec.BooleanValue FAKE_PLAYER_OWNER_ID;
     private static final ForgeConfigSpec.ConfigValue<List<? extends String>> EXTRA_UNMINABLE;
 
@@ -73,6 +75,16 @@ public final class GMConfig {
                 "If true, the fake player borrows the machine owner's UUID instead (FTB Chunks recognises it automatically,",
                 "but other mods may confuse it with the real player). Not recommended.")
                 .define("fakePlayerUsesOwnerUuid", false);
+        FAST_REMOVAL = b.comment("Remove plain blocks through the chunk directly instead of Level#setBlock.",
+                "Lighting, heightmaps and block removal callbacks still run; skipped are the per-block chunk lookup,",
+                "POI bookkeeping (POI blocks such as beds or workstations always take the normal path) and mob path",
+                "recalculation. Disable if another mod relies on Level#setBlock being called.")
+                .define("fastBlockRemoval", true);
+        CACHE_DROPS = b.comment("Remember the drops of blocks whose loot table contains no randomness at all",
+                "(e.g. stone, deepslate, netherrack, end stone, most modded 'drop itself' blocks) and reuse them.",
+                "Tables with any chance, bonus or unknown component are always evaluated normally. The cached result",
+                "is re-checked against the real loot table every 64 uses to catch global loot modifiers.")
+                .define("cacheDeterministicDrops", true);
         DEBUG_LOG = b.comment("Log every column (drops kept / voided) and every output attempt (target, items moved).",
                 "Only for troubleshooting: very spammy at IV.")
                 .define("debugLogging", false);
@@ -167,6 +179,22 @@ public final class GMConfig {
             return FAKE_PLAYER_OWNER_ID.get();
         } catch (IllegalStateException e) {
             return false;
+        }
+    }
+
+    public static boolean fastBlockRemoval() {
+        try {
+            return FAST_REMOVAL.get();
+        } catch (IllegalStateException e) {
+            return true;
+        }
+    }
+
+    public static boolean cacheDeterministicDrops() {
+        try {
+            return CACHE_DROPS.get();
+        } catch (IllegalStateException e) {
+            return true;
         }
     }
 

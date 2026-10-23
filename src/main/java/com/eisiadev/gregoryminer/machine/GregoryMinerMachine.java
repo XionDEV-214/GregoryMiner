@@ -48,11 +48,9 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.entity.ai.village.poi.PoiTypes;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
-import net.minecraft.world.level.storage.loot.LootParams;
-import net.minecraft.world.level.storage.loot.parameters.LootContextParams;
-import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import net.minecraftforge.common.MinecraftForge;
@@ -84,6 +82,7 @@ public class GregoryMinerMachine extends TieredEnergyMachine
     private static final int REMOVE_FLAGS = Block.UPDATE_CLIENTS | Block.UPDATE_KNOWN_SHAPE |
             Block.UPDATE_SUPPRESS_DROPS;
     private static final int MAX_FREE_SKIPS = 64;
+    private static final BlockState AIR = Blocks.AIR.defaultBlockState();
     private static final int OUTPUT_BACKOFF_TICKS = 20;
     public static final GameProfile FAKE_PROFILE = new GameProfile(
             UUID.fromString("6e0c5c7e-5b2b-4b9f-9a57-6772656f7279"), "[GregoryMiner]");
@@ -157,11 +156,14 @@ public class GregoryMinerMachine extends TieredEnergyMachine
     @UpdateListener(methodName = "onMuffleSynced")
     protected boolean muffled = false;
     @DescSynced
+    @UpdateListener(methodName = "onActiveSynced")
+    protected boolean active = false;
+    @DescSynced
     protected boolean outputMissing = false;
     @DescSynced
     protected boolean outputFull = false;
     @DescSynced
-    protected int fortuneLevel = 0, silkLevel = 0;
+    protected int fortuneLevel = 0, silkLevel = 0, harvestLevel = 0;
     @DescSynced
     protected boolean toolValid = false, toolPresent = false;
     @DescSynced
@@ -187,6 +189,10 @@ public class GregoryMinerMachine extends TieredEnergyMachine
     private GameProfile ownerProfile;
     @Nullable
     private Object workingSound;
+    @Nullable
+    private LevelChunk chunkCache;
+    private final DropCache dropCache = new DropCache();
+    private long lastWorkTick = Long.MIN_VALUE / 2;
 
     private final LongArrayList scanPos = new LongArrayList(64);
     private final ByteArrayList scanKind = new ByteArrayList(64);
@@ -246,6 +252,8 @@ public class GregoryMinerMachine extends TieredEnergyMachine
         rebuildWhitelist();
         refreshConfigSnapshot();
         updateBufferStats();
+        active = false;
+        updateRenderState();
         updateSubscription();
     }
 
@@ -316,6 +324,7 @@ public class GregoryMinerMachine extends TieredEnergyMachine
             tickSubscription.unsubscribe();
             tickSubscription = null;
         }
+        if (!workingEnabled || done) setActive(false);
         refreshStatus();
     }
 
@@ -326,6 +335,8 @@ public class GregoryMinerMachine extends TieredEnergyMachine
         if (!buffer.isEmpty() && now >= nextOutputTick) {
             pushOutput(level, now);
         }
+
+        if (active && now - lastWorkTick > activeTimeout()) setActive(false);
 
         if (!workingEnabled || done) {
             if (buffer.isEmpty()) updateSubscription();
@@ -355,27 +366,32 @@ public class GregoryMinerMachine extends TieredEnergyMachine
             cursorValid = true;
         }
 
-        for (int skips = 0; skips <= MAX_FREE_SKIPS; skips++) {
-            ColumnResult r = mineOneColumn(level, cursorX, cursorZ, cost);
-            switch (r) {
-                case WAIT_CHUNK -> {
-                    setStatus(MiningStatus.CHUNK_NOT_LOADED);
-                    return;
-                }
-                case MINED -> {
-                    advanceCursor(area);
-                    if (!done) setStatus(MiningStatus.WORKING);
-                    if (!buffer.isEmpty()) pushOutput(level, getOffsetTimer());
-                    markDirty();
-                    return;
-                }
-                case EMPTY -> {
-                    advanceCursor(area);
-                    if (done) return;
-                }
+        int parallel = getParallel();
+        int minedColumns = 0;
+        int skipped = 0;
+        boolean waitingChunk = false;
+        while (minedColumns < parallel && skipped <= MAX_FREE_SKIPS && !done) {
+            ColumnResult r = mineOneColumn(level, cursorX, cursorZ);
+            if (r == ColumnResult.WAIT_CHUNK) {
+                waitingChunk = true;
+                break;
             }
+            markWorked();
+            advanceCursor(area);
+            if (r == ColumnResult.MINED) minedColumns++;
+            else skipped++;
         }
-        setStatus(MiningStatus.WORKING);
+        chunkCache = null;
+
+        if (minedColumns > 0) {
+            energyContainer.removeEnergy(cost);
+            if (!buffer.isEmpty()) pushOutput(level, getOffsetTimer());
+        }
+        if (waitingChunk && minedColumns == 0 && skipped == 0) {
+            setStatus(MiningStatus.CHUNK_NOT_LOADED);
+            return;
+        }
+        if (!done) setStatus(MiningStatus.WORKING);
         markDirty();
     }
 
@@ -385,11 +401,15 @@ public class GregoryMinerMachine extends TieredEnergyMachine
         WAIT_CHUNK
     }
 
-    private ColumnResult mineOneColumn(ServerLevel level, int x, int z, long cost) {
+    private ColumnResult mineOneColumn(ServerLevel level, int x, int z) {
         int cx = SectionPos.blockToSectionCoord(x);
         int cz = SectionPos.blockToSectionCoord(z);
-        if (!level.hasChunk(cx, cz) && !GMConfig.loadUnloadedChunks()) return ColumnResult.WAIT_CHUNK;
-        LevelChunk chunk = level.getChunk(cx, cz);
+        LevelChunk chunk = chunkCache;
+        if (chunk == null || chunk.getPos().x != cx || chunk.getPos().z != cz) {
+            if (!level.hasChunk(cx, cz) && !GMConfig.loadUnloadedChunks()) return ColumnResult.WAIT_CHUNK;
+            chunk = level.getChunk(cx, cz);
+            chunkCache = chunk;
+        }
 
         int top = getPos().getY() - 1;
         int bottom = level.getMinBuildHeight();
@@ -440,9 +460,9 @@ public class GregoryMinerMachine extends TieredEnergyMachine
             }
         }
 
-        energyContainer.removeEnergy(cost);
-
         ItemStack tool = toolValid ? toolInventory.getStackInSlot(0) : MinerTools.fallbackTool();
+        boolean fast = GMConfig.fastBlockRemoval();
+        boolean cacheDrops = GMConfig.cacheDeterministicDrops();
         boolean filtering = !whitelist.isEmpty();
         int mined = 0;
         long kept = 0, voided = 0;
@@ -452,7 +472,7 @@ public class GregoryMinerMachine extends TieredEnergyMachine
             BlockState state = scanState.get(i);
 
             if (scanKind.getByte(i) == BlockRules.FLUID) {
-                level.setBlock(mpos, Blocks.AIR.defaultBlockState(), REMOVE_FLAGS);
+                removeBlock(level, chunk, mpos, state, fast);
                 mined++;
                 continue;
             }
@@ -461,10 +481,7 @@ public class GregoryMinerMachine extends TieredEnergyMachine
                 continue;
             }
 
-            LootParams.Builder loot = new LootParams.Builder(level)
-                    .withParameter(LootContextParams.ORIGIN, Vec3.atCenterOf(mpos))
-                    .withParameter(LootContextParams.TOOL, tool);
-            List<ItemStack> drops = state.getDrops(loot);
+            List<ItemStack> drops = dropCache.getDrops(level, state, mpos, tool, cacheDrops);
             for (int d = 0, n = drops.size(); d < n; d++) {
                 ItemStack drop = drops.get(d);
                 if (drop.isEmpty()) continue;
@@ -475,7 +492,7 @@ public class GregoryMinerMachine extends TieredEnergyMachine
                 kept += drop.getCount();
                 buffer.add(drop);
             }
-            level.setBlock(mpos, Blocks.AIR.defaultBlockState(), REMOVE_FLAGS);
+            removeBlock(level, chunk, mpos, state, fast);
             mined++;
         }
 
@@ -492,6 +509,18 @@ public class GregoryMinerMachine extends TieredEnergyMachine
         }
         if (!buffer.isEmpty()) updateSubscription();
         return ColumnResult.MINED;
+    }
+
+    private static void removeBlock(ServerLevel level, LevelChunk chunk, BlockPos.MutableBlockPos pos,
+                                    BlockState state, boolean fast) {
+        if (fast && PoiTypes.forState(state).isEmpty()) {
+            BlockPos immutable = pos.immutable();
+            if (chunk.setBlockState(immutable, AIR, false) != null) {
+                level.getChunkSource().blockChanged(immutable);
+            }
+        } else {
+            level.setBlock(pos, AIR, REMOVE_FLAGS);
+        }
     }
 
     private void advanceCursor(MinerArea area) {
@@ -566,11 +595,13 @@ public class GregoryMinerMachine extends TieredEnergyMachine
 
     private void onToolChanged() {
         if (isRemote()) return;
+        dropCache.clear();
         ItemStack tool = toolInventory.getStackInSlot(0);
         toolPresent = !tool.isEmpty();
         toolValid = MinerTools.isValidTool(tool);
         fortuneLevel = toolValid ? MinerTools.fortune(tool) : 0;
         silkLevel = toolValid ? MinerTools.silkTouch(tool) : 0;
+        harvestLevel = toolValid ? MinerTools.harvestLevel(tool) : 0;
     }
 
     private void updateBufferStats() {
@@ -631,20 +662,47 @@ public class GregoryMinerMachine extends TieredEnergyMachine
     private void setStatus(MiningStatus newStatus) {
         if (status != newStatus) {
             status = newStatus;
-            RecipeLogic.Status render = newStatus.renderStatus;
-            var renderState = getRenderState();
-            if (renderState.hasProperty(GTMachineModelProperties.RECIPE_LOGIC_STATUS) &&
-                    renderState.getValue(GTMachineModelProperties.RECIPE_LOGIC_STATUS) != render) {
-                setRenderState(renderState.setValue(GTMachineModelProperties.RECIPE_LOGIC_STATUS, render));
-            }
+            updateRenderState();
+        }
+    }
+
+    public int getParallel() {
+        return Math.max(1, harvestLevel);
+    }
+
+    private int activeTimeout() {
+        return Math.max(GMConfig.interval(tier) * 2, 10);
+    }
+
+    private void markWorked() {
+        lastWorkTick = getOffsetTimer();
+        setActive(true);
+    }
+
+    private void setActive(boolean value) {
+        if (active != value) {
+            active = value;
+            updateRenderState();
+        }
+    }
+
+    private void updateRenderState() {
+        RecipeLogic.Status render;
+        if (active) render = RecipeLogic.Status.WORKING;
+        else if (status == MiningStatus.PAUSED) render = RecipeLogic.Status.SUSPEND;
+        else render = RecipeLogic.Status.IDLE;
+        var renderState = getRenderState();
+        if (renderState.hasProperty(GTMachineModelProperties.RECIPE_LOGIC_STATUS) &&
+                renderState.getValue(GTMachineModelProperties.RECIPE_LOGIC_STATUS) != render) {
+            setRenderState(renderState.setValue(GTMachineModelProperties.RECIPE_LOGIC_STATUS, render));
         }
     }
 
     private void refreshStatus() {
         if (done) setStatus(MiningStatus.DONE);
         else if (!workingEnabled) setStatus(MiningStatus.PAUSED);
-        else if (status == MiningStatus.IDLE || status == MiningStatus.PAUSED || status == MiningStatus.DONE) {
-            setStatus(MiningStatus.WORKING);
+        else if (status == MiningStatus.PAUSED || status == MiningStatus.DONE) {
+            setStatus(MiningStatus.IDLE);
         }
     }
 
@@ -739,7 +797,7 @@ public class GregoryMinerMachine extends TieredEnergyMachine
     }
 
     public boolean isSoundActive() {
-        return status.renderStatus == RecipeLogic.Status.WORKING;
+        return active;
     }
 
     private boolean shouldPlaySound() {
@@ -748,6 +806,11 @@ public class GregoryMinerMachine extends TieredEnergyMachine
 
     @SuppressWarnings("unused")
     private void onStatusSynced(MiningStatus newValue, MiningStatus oldValue) {
+        scheduleRenderUpdate();
+    }
+
+    @SuppressWarnings("unused")
+    private void onActiveSynced(boolean newValue, boolean oldValue) {
         scheduleRenderUpdate();
         updateSound();
     }
@@ -846,6 +909,7 @@ public class GregoryMinerMachine extends TieredEnergyMachine
             text.add(Component.translatable("gregoryminer.info.cursor", cursorX, cursorZ)
                     .withStyle(ChatFormatting.GRAY));
         }
+        text.add(Component.translatable("gregoryminer.info.parallel", getParallel(), harvestLevel));
         text.add(Component.translatable("gregoryminer.info.fortune", fortuneLevel)
                 .append(silkLevel > 0 ? Component.translatable("gregoryminer.info.silk_touch") :
                         Component.empty()));

@@ -66,5 +66,7 @@
   "config.jade.plugin_gregoryminer.miner_info": "그레고리 마이너 정보",
   "gregoryminer.info.output_full": "출력 인벤토리가 가득 참 - 드롭이 버퍼에 쌓이는 중!",
   "gregoryminer.gui.step.tooltip": "Shift+클릭: ±4 청크 / ±16 블록",
-  "gregoryminer.info.items": "아이템: 회수 %s / 출력 %s / 필터 소각 %s"
+  "gregoryminer.info.items": "아이템: 회수 %s / 출력 %s / 필터 소각 %s",
+  "gregoryminer.info.parallel": "병렬: 작업당 %s줄 (도구 채굴 레벨 %s)",
+  "gregoryminer.tooltip.parallel": "§7도구의 채굴 레벨만큼 작업당 여러 줄을 동시에 캡니다"
 }

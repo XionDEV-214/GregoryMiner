@@ -63,6 +63,7 @@ public final class GMMachines {
                                     FormattingUtil.formatNumbers(GMConfig.euPerColumn(tier))));
                             tooltip.add(Component.translatable("gregoryminer.tooltip.area", maxChunks, maxChunks));
                             tooltip.add(Component.translatable("gregoryminer.tooltip.tool"));
+                            tooltip.add(Component.translatable("gregoryminer.tooltip.parallel"));
                             tooltip.add(Component.translatable("gregoryminer.tooltip.filter", side, side));
                             tooltip.add(Component.translatable("gtceu.universal.tooltip.voltage_in",
                                     FormattingUtil.formatNumbers(GTValues.V[tier]), GTValues.VNF[tier]));
