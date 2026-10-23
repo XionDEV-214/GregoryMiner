@@ -16,6 +16,11 @@ import com.gregtechceu.gtceu.api.machine.feature.IAutoOutputItem;
 import com.gregtechceu.gtceu.api.machine.feature.IDropSaveMachine;
 import com.gregtechceu.gtceu.api.machine.feature.IFancyUIMachine;
 import com.gregtechceu.gtceu.api.machine.feature.IMachineLife;
+import com.gregtechceu.gtceu.api.machine.feature.IMufflableMachine;
+import com.gregtechceu.gtceu.api.machine.MetaMachine;
+import com.gregtechceu.gtceu.api.sound.AutoReleasedSound;
+import com.gregtechceu.gtceu.common.data.GTSoundEntries;
+import com.gregtechceu.gtceu.config.ConfigHolder;
 import com.gregtechceu.gtceu.api.machine.property.GTMachineModelProperties;
 import com.gregtechceu.gtceu.api.machine.trait.RecipeLogic;
 import com.gregtechceu.gtceu.api.transfer.item.CustomItemStackHandler;
@@ -25,6 +30,7 @@ import com.lowdragmc.lowdraglib.syncdata.annotation.DescSynced;
 import com.lowdragmc.lowdraglib.syncdata.annotation.DropSaved;
 import com.lowdragmc.lowdraglib.syncdata.annotation.Persisted;
 import com.lowdragmc.lowdraglib.syncdata.annotation.RequireRerender;
+import com.lowdragmc.lowdraglib.syncdata.annotation.UpdateListener;
 import com.lowdragmc.lowdraglib.syncdata.field.ManagedFieldHolder;
 
 import net.minecraft.ChatFormatting;
@@ -47,6 +53,8 @@ import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.level.storage.loot.LootParams;
 import net.minecraft.world.level.storage.loot.parameters.LootContextParams;
 import net.minecraft.world.phys.Vec3;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.api.distmarker.OnlyIn;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.common.capabilities.ForgeCapabilities;
 import net.minecraftforge.common.util.FakePlayer;
@@ -68,7 +76,7 @@ import java.util.UUID;
 
 public class GregoryMinerMachine extends TieredEnergyMachine
                                  implements IControllable, IFancyUIMachine, IAutoOutputItem, IMachineLife,
-                                 IDropSaveMachine {
+                                 IDropSaveMachine, IMufflableMachine {
 
     protected static final ManagedFieldHolder MANAGED_FIELD_HOLDER = new ManagedFieldHolder(
             GregoryMinerMachine.class, TieredEnergyMachine.MANAGED_FIELD_HOLDER);
@@ -142,7 +150,12 @@ public class GregoryMinerMachine extends TieredEnergyMachine
     @DescSynced
     protected int areaTopY, areaBottomY;
     @DescSynced
+    @UpdateListener(methodName = "onStatusSynced")
     protected MiningStatus status = MiningStatus.IDLE;
+    @Persisted
+    @DescSynced
+    @UpdateListener(methodName = "onMuffleSynced")
+    protected boolean muffled = false;
     @DescSynced
     protected boolean outputMissing = false;
     @DescSynced
@@ -172,6 +185,8 @@ public class GregoryMinerMachine extends TieredEnergyMachine
     private final Set<Item> whitelist = new ReferenceOpenHashSet<>();
     @Nullable
     private GameProfile ownerProfile;
+    @Nullable
+    private Object workingSound;
 
     private final LongArrayList scanPos = new LongArrayList(64);
     private final ByteArrayList scanKind = new ByteArrayList(64);
@@ -220,6 +235,7 @@ public class GregoryMinerMachine extends TieredEnergyMachine
         super.onLoad();
         if (isRemote()) {
             AreaRenderRegistry.add(this);
+            updateSound();
             return;
         }
         if (outputFacingItems == null || outputFacingItems == getFrontFacing()) {
@@ -710,6 +726,49 @@ public class GregoryMinerMachine extends TieredEnergyMachine
             filterInventory.setStackInSlot(i, ItemStack.EMPTY);
         }
         rebuildWhitelist();
+    }
+
+    @Override
+    public boolean isMuffled() {
+        return muffled;
+    }
+
+    @Override
+    public void setMuffled(boolean isMuffled) {
+        muffled = isMuffled;
+    }
+
+    public boolean isSoundActive() {
+        return status.renderStatus == RecipeLogic.Status.WORKING;
+    }
+
+    private boolean shouldPlaySound() {
+        return ConfigHolder.INSTANCE.machines.machineSounds && !muffled;
+    }
+
+    @SuppressWarnings("unused")
+    private void onStatusSynced(MiningStatus newValue, MiningStatus oldValue) {
+        scheduleRenderUpdate();
+        updateSound();
+    }
+
+    @SuppressWarnings("unused")
+    private void onMuffleSynced(boolean newValue, boolean oldValue) {
+        updateSound();
+    }
+
+    @OnlyIn(Dist.CLIENT)
+    private void updateSound() {
+        if (shouldPlaySound() && isSoundActive()) {
+            if (workingSound instanceof AutoReleasedSound sound && !sound.isStopped()) return;
+            workingSound = GTSoundEntries.MINER.playAutoReleasedSound(
+                    () -> shouldPlaySound() && isSoundActive() && !isInValid() && getLevel() != null &&
+                            getLevel().isLoaded(getPos()) && MetaMachine.getMachine(getLevel(), getPos()) == this,
+                    getPos(), true, 0, 1, 1);
+        } else if (workingSound instanceof AutoReleasedSound sound) {
+            sound.release();
+            workingSound = null;
+        }
     }
 
     @Override

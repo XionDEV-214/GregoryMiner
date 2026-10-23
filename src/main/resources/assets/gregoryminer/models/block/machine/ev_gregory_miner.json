@@ -32,7 +32,8 @@
           "overlay_back": "gtceu:block/machines/miner/overlay_back",
           "overlay_front": "gtceu:block/machines/miner/overlay_front",
           "overlay_side": "gtceu:block/machines/miner/overlay_side",
-          "overlay_top": "gtceu:block/machines/miner/overlay_top"
+          "overlay_top": "gtceu:block/machines/miner/overlay_top",
+          "overlay_top_emissive": "gtceu:block/machines/miner/overlay_top_active_emissive"
         }
       }
     },
@@ -43,7 +44,8 @@
           "overlay_back": "gtceu:block/machines/miner/overlay_back",
           "overlay_front": "gtceu:block/machines/miner/overlay_front",
           "overlay_side": "gtceu:block/machines/miner/overlay_side",
-          "overlay_top": "gtceu:block/machines/miner/overlay_top"
+          "overlay_top": "gtceu:block/machines/miner/overlay_top",
+          "overlay_top_emissive": "gtceu:block/machines/miner/overlay_top_active_emissive"
         }
       }
     }
